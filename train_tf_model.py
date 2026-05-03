@@ -2,68 +2,92 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils import shuffle
 import tensorflow as tf
 from tensorflow.keras import layers, models
+from tensorflow.keras.callbacks import EarlyStopping
+import json
 
-import numpy as np
+# -----------------------------
+# CONFIG
+# -----------------------------
+SEQUENCE_LENGTH = 15
 
-def normalize_landmarks(sample):
-    sample = sample.reshape(21, 3)
+# -----------------------------
+# NORMALIZATION (SEQUENCE)
+# -----------------------------
+def normalize_sequence(sequence):
+    sequence = sequence.reshape(SEQUENCE_LENGTH, 21, 3)
     
-    # Step 1: wrist as origin
-    wrist = sample[0]
-    sample = sample - wrist
+    normalized = []
+    for frame in sequence:
+        wrist = frame[0]
+        frame = frame - wrist
+        
+        max_dist = np.max(np.linalg.norm(frame, axis=1))
+        if max_dist > 0:
+            frame = frame / max_dist
+        
+        normalized.append(frame.flatten())
     
-    # Step 2: scale normalization
-    distances = np.linalg.norm(sample, axis=1)
-    max_dist = np.max(distances)
-    
-    if max_dist > 0:
-        sample = sample / max_dist
-    
-    return sample.flatten()
+    return np.array(normalized)
 
-# Load dataset
+# -----------------------------
+# LOAD DATA
+# -----------------------------
 data = pd.read_csv("landmarks.csv")
 data = data.replace("####", np.nan)
 data = data.dropna()
-# Split features and labels
-# Split correctly
-X = data.iloc[:, 1:].astype(float).values   # force numeric
-y = data.iloc[:, 0].values
- 
-X = np.array([normalize_landmarks(sample) for sample in X])
 
-# Encode labels
+X = data.iloc[:, 1:].astype(float).values   # (samples, 945)
+y = data.iloc[:, 0].values
+
+# -----------------------------
+# RESHAPE + NORMALIZE
+# -----------------------------
+X = X.reshape(-1, SEQUENCE_LENGTH, 63)
+X = np.array([normalize_sequence(sample) for sample in X])
+
+print("X shape:", X.shape)  # should be (samples, 15, 63)
+
+# -----------------------------
+# ENCODE LABELS
+# -----------------------------
 encoder = LabelEncoder()
 y = encoder.fit_transform(y)
 
-# Save labels
-import json
 with open("labels.json", "w") as f:
-    json.dump(list(encoder.classes_), f) 
+    json.dump(list(encoder.classes_), f)
 
-from sklearn.utils import shuffle
-
+# -----------------------------
+# SHUFFLE + SPLIT
+# -----------------------------
 X, y = shuffle(X, y, random_state=42)
 
-# Train-test split
-from sklearn.model_selection import train_test_split
+if len(set(y)) > 1:
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y,
+        test_size=0.2,
+        stratify=y,
+        random_state=42
+    )
+else:
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y,
+        test_size=0.2,
+        random_state=42
+    )
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y,
-    test_size=0.2,
-    stratify=y,
-    random_state=42
-)
-
-
-
-
-# Build model
+# -----------------------------
+# MODEL (LSTM)
+# -----------------------------
 model = models.Sequential([
-    layers.Dense(64, activation='relu', input_shape=(X.shape[1],)),
-    layers.Dropout(0.5),
+    layers.LSTM(128, return_sequences=True, input_shape=(SEQUENCE_LENGTH, 63)),
+    layers.Dropout(0.3),
+
+    layers.LSTM(64),
+    layers.Dropout(0.3),
+
     layers.Dense(32, activation='relu'),
     layers.Dense(len(set(y)), activation='softmax')
 ])
@@ -74,11 +98,26 @@ model.compile(
     metrics=['accuracy']
 )
 
-# Train
-model.fit(X_train, y_train, epochs=20, validation_data=(X_test, y_test))
+# -----------------------------
+# TRAIN
+# -----------------------------
+early_stop = EarlyStopping(
+    monitor='val_loss',
+    patience=3,
+    restore_best_weights=True
+)
 
-# Save model
+model.fit(
+    X_train, y_train,
+    epochs=20,
+    batch_size=8,
+    validation_data=(X_test, y_test),
+    callbacks=[early_stop]
+)
+
+# -----------------------------
+# SAVE MODEL
+# -----------------------------
 model.save("model.h5")
 
-print("✅ Model trained and saved as model.h5")
-
+print("Model trained and saved as model.h5")

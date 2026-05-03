@@ -15,21 +15,14 @@ MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
     "hand_landmarker/float16/1/hand_landmarker.task"
 )
-SAMPLES_PER_GESTURE = 100
-FEATURE_COLUMNS = [f"{axis}{index}" for index in range(21) for axis in ("x", "y", "z")]
-SEQUENCE_LENGTH = 30
+SEQUENCE_LENGTH = 15
+SAMPLES_PER_GESTURE = 40
+frame_skip = 2
+
 FEATURE_COLUMNS = [f"f{i}" for i in range(SEQUENCE_LENGTH * 63)]
 CSV_COLUMNS = ["label", *FEATURE_COLUMNS]
-HAND_CONNECTIONS = [
-    (0, 1), (1, 2), (2, 3), (3, 4),
-    (0, 5), (5, 6), (6, 7), (7, 8),
-    (5, 9), (9, 10), (10, 11), (11, 12),
-    (9, 13), (13, 14), (14, 15), (15, 16),
-    (13, 17), (0, 17), (17, 18), (18, 19), (19, 20),
-]
 
-SEQUENCE_LENGTH = 30
-sequence = []
+
 
 def ensure_csv_header(path: Path) -> None:
     if path.exists() and path.stat().st_size > 0:
@@ -51,7 +44,13 @@ def flatten_landmarks(hand_landmarks) -> list[float]:
     for landmark in hand_landmarks:
         values.extend([landmark.x, landmark.y, landmark.z])
     return values
-
+HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    (5, 9), (9, 10), (10, 11), (11, 12),
+    (9, 13), (13, 14), (14, 15), (15, 16),
+    (13, 17), (0, 17), (17, 18), (18, 19), (19, 20),
+]
 
 def draw_landmarks(frame, landmarks) -> None:
     height, width = frame.shape[:2]
@@ -85,6 +84,8 @@ def append_sample(path: Path, label: str, features: list[float]) -> None:
 def main() -> None:
     ensure_csv_header(OUTPUT_FILE)
     ensure_model_file()
+    sequence = []
+    frame_counter = 0
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -111,6 +112,10 @@ def main() -> None:
                 print("Could not read a frame from the webcam.")
                 break
 
+            frame_counter += 1
+            if frame_counter % frame_skip != 0:
+                continue    
+
             frame = cv2.flip(frame, 1)
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
@@ -134,18 +139,18 @@ def main() -> None:
                         sequence = []
                         recorded_count += 1
 
-            if recorded_count >= SAMPLES_PER_GESTURE:
-                print(f"Saved {SAMPLES_PER_GESTURE} sequences for {recording_label}")
-                recording_label = None
-                recorded_count = 0
+                        if recorded_count >= SAMPLES_PER_GESTURE:
+                            print(f"Saved {SAMPLES_PER_GESTURE} sequences for {recording_label}")
+                            recording_label = None
+                            recorded_count = 0
                     
 
-            status = "Press A-Z to record 100 frames. Press Esc to quit."
+            status = "Press A-Z to record gestures. Press Esc to quit."
             if recording_label:
                 status = f"Recording {recording_label}: {recorded_count}/{SAMPLES_PER_GESTURE}"
                 if not hand_detected:
                     status += " - show one hand"
-
+                
             cv2.rectangle(frame, (0, 0), (frame.shape[1], 42), (17, 19, 21), -1)
             cv2.putText(
                 frame,
