@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Real-time ISL Translator</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111315;
+      --panel: #1c2226;
+      --panel-soft: #242b30;
+      --text: #f4f7f8;
+      --muted: #a7b2b8;
+      --accent: #37d399;
+      --accent-2: #f2c14e;
+      --danger: #ff6b6b;
+      --line: #344047;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    main {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.55fr);
+    }
+
+    .camera-stage {
+      position: relative;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        linear-gradient(135deg, rgba(55, 211, 153, 0.10), transparent 35%),
+        radial-gradient(circle at 80% 10%, rgba(242, 193, 78, 0.12), transparent 32%),
+        #15191c;
+      overflow: hidden;
+    }
+
+    .video-wrap {
+      position: relative;
+      width: min(100%, 980px);
+      aspect-ratio: 16 / 9;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #050607;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+    }
+
+    video,
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+
+    .status-chip {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 3;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+      background: rgba(17, 19, 21, 0.78);
+      backdrop-filter: blur(10px);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--accent-2);
+      box-shadow: 0 0 16px currentColor;
+    }
+
+    .dot.ready {
+      background: var(--accent);
+    }
+
+    .dot.error {
+      background: var(--danger);
+    }
+
+    .panel {
+      min-height: 100vh;
+      padding: 30px;
+      background: var(--panel);
+      border-left: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: clamp(25px, 4vw, 34px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: -12px 0 0;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .result-box {
+      padding: 22px;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .label {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .gesture {
+      min-height: 83px;
+      margin: 0;
+      font-size: clamp(48px, 10vw, 80px);
+      font-weight: 800;
+      line-height: 1;
+      word-break: break-word;
+    }
+
+    .confidence-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 16px 0 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .progress {
+      height: 12px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #111619;
+      border: 1px solid var(--line);
+    }
+
+    .progress span {
+      display: block;
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 140ms ease;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 160px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #12171a;
+      color: var(--text);
+      padding: 14px;
+      font: inherit;
+      line-height: 1.5;
+      outline: none;
+    }
+
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(55, 211, 153, 0.16);
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    button {
+      min-height: 46px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0 16px;
+      font: inherit;
+      font-weight: 700;
+      color: #07110d;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    button.secondary {
+      color: var(--text);
+      background: #2c353a;
+      border: 1px solid var(--line);
+    }
+
+    button.danger {
+      color: #fff;
+      background: #9d3434;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .message {
+      min-height: 44px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #12171a;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      .camera-stage,
+      .panel {
+        min-height: auto;
+      }
+
+      .camera-stage {
+        padding: 14px;
+      }
+
+      .panel {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding: 22px 16px 26px;
+      }
+
+      .buttons {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="camera-stage" aria-label="Webcam detection area">
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="status-chip" aria-live="polite">
+          <span id="statusDot" class="dot"></span>
+          <span id="statusText">Starting camera...</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <h1 class="title">ISL Translator</h1>
+      <p class="subtitle">Real-time hand landmarks, gesture classification, sentence building, and speech output in one browser page.</p>
+
+      <section class="result-box">
+        <p class="label">Current sign</p>
+        <p id="gesture" class="gesture">...</p>
+        <div class="confidence-row">
+          <span>Confidence</span>
+          <strong id="confidenceText">0%</strong>
+        </div>
+        <div class="progress" aria-label="Prediction confidence">
+          <span id="confidenceBar"></span>
+        </div>
+      </section>
+
+      <section>
+        <p class="label">Sentence builder</p>
+        <textarea id="sentence" placeholder="Recognized signs will appear here when you add them."></textarea>
+      </section>
+
+      <div class="buttons">
+        <button id="addButton" disabled>Add to sentence</button>
+        <button id="speakButton" class="secondary">Speak</button>
+        <button id="spaceButton" class="secondary">Space</button>
+        <button id="clearButton" class="danger">Clear</button>
+      </div>
+
+      <div id="message" class="message" role="status">Load a trained model in ./tfjs_model/model.json before running predictions.</div>
+    </aside>
+  </main>
+
+  <script>
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("overlay");
+    const ctx = canvas.getContext("2d");
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const gestureEl = document.getElementById("gesture");
+    const confidenceText = document.getElementById("confidenceText");
+    const confidenceBar = document.getElementById("confidenceBar");
+    const sentenceEl = document.getElementById("sentence");
+    const addButton = document.getElementById("addButton");
+    const speakButton = document.getElementById("speakButton");
+    const clearButton = document.getElementById("clearButton");
+    const spaceButton = document.getElementById("spaceButton");
+    const messageEl = document.getElementById("message");
+
+    const fallbackLabels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+    let labels = fallbackLabels;
+  
+    let hands = null;
+    let currentGesture = "";
+    let currentConfidence = 0;
+    let latestResults = null;
+    let processingFrame = false;
+    let lastInferenceAt = 0;
+    const inferenceIntervalMs = 75;
+
+    const HAND_CONNECTIONS = [
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 5], [5, 6], [6, 7], [7, 8],
+      [5, 9], [9, 10], [10, 11], [11, 12],
+      [9, 13], [13, 14], [14, 15], [15, 16],
+      [13, 17], [0, 17], [17, 18], [18, 19], [19, 20]
+    ];
+
+    function setStatus(text, type = "loading") {
+      statusText.textContent = text;
+      statusDot.className = `dot ${type === "ready" ? "ready" : type === "error" ? "error" : ""}`;
+    }
+
+    function setMessage(text) {
+      messageEl.textContent = text;
+    }
+
+    function resizeCanvas() {
+      const width = video.videoWidth || canvas.clientWidth;
+      const height = video.videoHeight || canvas.clientHeight;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+    }
+
+    function normalizeLandmarks(landmarks) {
+      const wrist = landmarks[0];
+      const centered = landmarks.map((point) => ({
+        x: point.x - wrist.x,
+        y: point.y - wrist.y,
+        z: point.z - wrist.z
+      }));
+
+      const scale = Math.max(
+        ...centered.map((point) => Math.hypot(point.x, point.y, point.z)),
+        1e-6
+      );
+
+      return centered.flatMap((point) => [
+        point.x / scale,
+        point.y / scale,
+        point.z / scale
+      ]);
+    }
+
+    async function sendToBackend(landmarks) {
+  try {
+    const response = await fetch("http://127.0.0.1:5000/predict", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ landmarks })
+    });
+
+    return await response.json();
+  } catch (err) {
+    console.error("Backend error:", err);
+    return null;
+  }
+}
+    function drawHand(landmarks) {
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "rgba(55, 211, 153, 0.92)";
+      ctx.fillStyle = "#f2c14e";
+
+      HAND_CONNECTIONS.forEach(([start, end]) => {
+        const a = landmarks[start];
+        const b = landmarks[end];
+        ctx.beginPath();
+        ctx.moveTo(a.x * canvas.width, a.y * canvas.height);
+        ctx.lineTo(b.x * canvas.width, b.y * canvas.height);
+        ctx.stroke();
+      });
+
+      landmarks.forEach((point) => {
+        ctx.beginPath();
+        ctx.arc(point.x * canvas.width, point.y * canvas.height, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    async function loadLabels() {
+      try {
+        const response = await fetch("./tfjs_model/labels.json", { cache: "no-store" });
+        if (response.ok) {
+          labels = await response.json();
+        }
+      } catch {
+        labels = fallbackLabels;
+      }
+    }
+
+   
+
+
+
+    async function predictGesture(landmarks) {
+  const features = normalizeLandmarks(landmarks);
+
+  const result = await sendToBackend(features);
+
+  if (!result) return;
+
+  currentGesture = result.label;
+  currentConfidence = result.confidence;
+
+  gestureEl.textContent = currentGesture;
+  confidenceText.textContent = `${Math.round(currentConfidence * 100)}%`;
+  confidenceBar.style.width = `${Math.round(currentConfidence * 100)}%`;
+
+  addButton.disabled = currentConfidence < 0.5;
+}
+
+    function handleResults(results) {
+      latestResults = results;
+    }
+
+    async function frameLoop(now) {
+      resizeCanvas();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (latestResults?.multiHandLandmarks?.length) {
+        const landmarks = latestResults.multiHandLandmarks[0];
+        drawHand(landmarks);
+        if (now - lastInferenceAt > inferenceIntervalMs) {
+          lastInferenceAt = now;
+          await predictGesture(landmarks);
+        }
+      } else {
+        currentGesture = "";
+        currentConfidence = 0;
+        gestureEl.textContent = "No hand";
+        confidenceText.textContent = "0%";
+        confidenceBar.style.width = "0%";
+        addButton.disabled = true;
+      }
+
+      if (hands && video.readyState >= 2 && !processingFrame) {
+        processingFrame = true;
+        hands.send({ image: video }).finally(() => {
+          processingFrame = false;
+        });
+      }
+
+      requestAnimationFrame(frameLoop);
+    }
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        setStatus("Camera ready", "ready");
+      } catch (error) {
+        console.error("Camera error:", error);
+        setStatus("Camera blocked", "error");
+        setMessage("Webcam permission was denied or no camera is available. Allow camera access and refresh.");
+        throw error;
+      }
+    }
+
+    function initHands() {
+      hands = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
+      });
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.65,
+        minTrackingConfidence: 0.65
+      });
+      hands.onResults(handleResults);
+    }
+
+    addButton.addEventListener("click", () => {
+      if (!currentGesture) return;
+      const needsSpace = sentenceEl.value && !sentenceEl.value.endsWith(" ");
+      sentenceEl.value += `${needsSpace ? " " : ""}${currentGesture}`;
+    });
+
+    spaceButton.addEventListener("click", () => {
+      if (!sentenceEl.value.endsWith(" ")) sentenceEl.value += " ";
+      sentenceEl.focus();
+    });
+
+    speakButton.addEventListener("click", () => {
+      const text = sentenceEl.value.trim();
+      if (!text) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "en-IN";
+      utterance.rate = 0.95;
+      window.speechSynthesis.speak(utterance);
+    });
+
+    clearButton.addEventListener("click", () => {
+      sentenceEl.value = "";
+      window.speechSynthesis.cancel();
+    });
+
+    async function init() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStatus("Unsupported browser", "error");
+        setMessage("This browser does not support webcam access through getUserMedia.");
+        return;
+      }
+
+      initHands();
+      await startCamera();
+      requestAnimationFrame(frameLoop);
+    }
+
+    init().catch(() => {
+      gestureEl.textContent = "Error";
+    });
+  </script>
+</body>
+</html>
