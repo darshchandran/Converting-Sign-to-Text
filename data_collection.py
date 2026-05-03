@@ -2,7 +2,7 @@ import csv
 import os
 import urllib.request
 from pathlib import Path
-
+import numpy as np
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -17,6 +17,8 @@ MODEL_URL = (
 )
 SAMPLES_PER_GESTURE = 100
 FEATURE_COLUMNS = [f"{axis}{index}" for index in range(21) for axis in ("x", "y", "z")]
+SEQUENCE_LENGTH = 30
+FEATURE_COLUMNS = [f"f{i}" for i in range(SEQUENCE_LENGTH * 63)]
 CSV_COLUMNS = ["label", *FEATURE_COLUMNS]
 HAND_CONNECTIONS = [
     (0, 1), (1, 2), (2, 3), (3, 4),
@@ -26,6 +28,8 @@ HAND_CONNECTIONS = [
     (13, 17), (0, 17), (17, 18), (18, 19), (19, 20),
 ]
 
+SEQUENCE_LENGTH = 30
+sequence = []
 
 def ensure_csv_header(path: Path) -> None:
     if path.exists() and path.stat().st_size > 0:
@@ -120,12 +124,21 @@ def main() -> None:
                 draw_landmarks(frame, hand_landmarks)
 
                 if recording_label:
-                    append_sample(OUTPUT_FILE, recording_label, flatten_landmarks(hand_landmarks))
-                    recorded_count += 1
-                    if recorded_count >= SAMPLES_PER_GESTURE:
-                        print(f"Saved {SAMPLES_PER_GESTURE} samples for {recording_label}")
-                        recording_label = None
-                        recorded_count = 0
+                    features = flatten_landmarks(hand_landmarks)
+                    sequence.append(features)
+
+                    if len(sequence) == SEQUENCE_LENGTH:
+                        flat_sequence = np.array(sequence).flatten().tolist()
+                        append_sample(OUTPUT_FILE, recording_label, flat_sequence)
+
+                        sequence = []
+                        recorded_count += 1
+
+            if recorded_count >= SAMPLES_PER_GESTURE:
+                print(f"Saved {SAMPLES_PER_GESTURE} sequences for {recording_label}")
+                recording_label = None
+                recorded_count = 0
+                    
 
             status = "Press A-Z to record 100 frames. Press Esc to quit."
             if recording_label:
@@ -152,6 +165,7 @@ def main() -> None:
             if ord("a") <= key <= ord("z") or ord("A") <= key <= ord("Z"):
                 recording_label = chr(key).upper()
                 recorded_count = 0
+                sequence = []
                 print(f"Recording {SAMPLES_PER_GESTURE} samples for {recording_label}. Keep the sign steady.")
 
     cap.release()
