@@ -18,19 +18,19 @@ SEQUENCE_LENGTH = 15
 # -----------------------------
 def normalize_sequence(sequence):
     sequence = sequence.reshape(SEQUENCE_LENGTH, 21, 3)
-    
+
     normalized = []
     for frame in sequence:
         wrist = frame[0]
         frame = frame - wrist
-        
+
         max_dist = np.max(np.linalg.norm(frame, axis=1))
         if max_dist > 0:
             frame = frame / max_dist
-        
+
         normalized.append(frame.flatten())
-    
-    return np.array(normalized)
+
+    return np.array(normalized)  # shape (15, 63)
 
 # -----------------------------
 # LOAD DATA
@@ -48,7 +48,8 @@ y = data.iloc[:, 0].values
 X = X.reshape(-1, SEQUENCE_LENGTH, 63)
 X = np.array([normalize_sequence(sample) for sample in X])
 
-print("X shape:", X.shape)  # should be (samples, 15, 63)
+print("X shape:", X.shape)
+print("Value range:", np.min(X), np.max(X))
 
 # -----------------------------
 # ENCODE LABELS
@@ -83,9 +84,11 @@ else:
 # -----------------------------
 model = models.Sequential([
     layers.LSTM(128, return_sequences=True, input_shape=(SEQUENCE_LENGTH, 63)),
+    layers.BatchNormalization(),
     layers.Dropout(0.3),
 
     layers.LSTM(64),
+    layers.BatchNormalization(),
     layers.Dropout(0.3),
 
     layers.Dense(32, activation='relu'),
@@ -107,7 +110,7 @@ early_stop = EarlyStopping(
     restore_best_weights=True
 )
 
-model.fit(
+history = model.fit(
     X_train, y_train,
     epochs=20,
     batch_size=8,
@@ -116,8 +119,14 @@ model.fit(
 )
 
 # -----------------------------
+# EVALUATE
+# -----------------------------
+loss, acc = model.evaluate(X_test, y_test)
+print("Test Accuracy:", acc)
+
+# -----------------------------
 # SAVE MODEL
 # -----------------------------
 model.save("model.h5")
 
-print("Model trained and saved as model.h5")
+print("✅ Model trained and saved as model.h5")

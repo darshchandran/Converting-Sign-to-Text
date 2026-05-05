@@ -339,6 +339,8 @@
     let currentConfidence = 0;
     let latestResults = null;
     let processingFrame = false;
+    let sequence = [];
+    const SEQUENCE_LENGTH = 15;
     let lastInferenceAt = 0;
     const inferenceIntervalMs = 75;
 
@@ -443,8 +445,17 @@
     async function predictGesture(landmarks) {
   const features = normalizeLandmarks(landmarks);
 
-  const result = await sendToBackend(features);
+  sequence.push(features);
 
+  if (sequence.length > SEQUENCE_LENGTH) {
+    sequence.shift();
+  }
+
+  if (sequence.length < SEQUENCE_LENGTH) return;
+
+  const flat = sequence.flat();
+
+  const result = await sendToBackend(flat);
   if (!result) return;
 
   currentGesture = result.label;
@@ -456,7 +467,6 @@
 
   addButton.disabled = currentConfidence < 0.5;
 }
-
     function handleResults(results) {
       latestResults = results;
     }
